@@ -14,10 +14,12 @@ import qs.Ui
 // half instead: only the prompt moves, the SUPER menu stays exactly where
 // Omarchy puts it.
 //
-// Generic on purpose — the payload carries the prompt and the command, and the
-// typed line is passed to that command as a single argument:
+// Named for its one caller, but still payload-driven: the summon carries the
+// prompt text and the command, and the typed line is passed to that command as
+// a single argument. Nothing here knows about TickTick — `ticktick-add-launch`
+// supplies `ticktask.sh` and the task-syntax hint in the prompt.
 //
-//   omarchy-shell shell summon quick-add \
+//   omarchy-shell shell summon ticktick-quick-add \
 //     '{"prompt":"New task","exec":"ticktask.sh"}'
 //
 // Borrowed wholesale from plugins/reminders/ReminderFlow.qml: the same key
@@ -67,7 +69,7 @@ Item {
   function dismiss() {
     root.opened = false
     if (root.shell && typeof root.shell.hide === "function")
-      root.shell.hide((root.manifest && root.manifest.id) || "quick-add")
+      root.shell.hide((root.manifest && root.manifest.id) || "ticktick-quick-add")
   }
 
   function toggle() {
@@ -94,7 +96,7 @@ Item {
     visible: root.opened
     anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
-    WlrLayershell.namespace: "quick-add"
+    WlrLayershell.namespace: "ticktick-quick-add"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
     exclusionMode: ExclusionMode.Ignore

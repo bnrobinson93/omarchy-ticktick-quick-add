@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "quick-add",
-  "name": "Quick add",
+  "id": "ticktick-quick-add",
+  "name": "TickTick quick add",
   "version": "1.0.0",
   "author": "Brad",
-  "description": "Spotlight-style free-text prompt near the top of the screen",
+  "description": "Spotlight-style prompt for capturing a TickTick task",
   "kinds": [
     "overlay"
   ],
