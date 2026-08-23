@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "quick-add",
+  "name": "Quick add",
+  "version": "1.0.0",
+  "author": "Brad",
+  "description": "Spotlight-style free-text prompt near the top of the screen",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "QuickAdd.qml"
+  }
+}
