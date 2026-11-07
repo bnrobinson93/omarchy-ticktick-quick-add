@@ -1,6 +1,6 @@
 # ticktick-quick-add
 
-An [Omarchy](https://omarchy.org/) overlay plugin that parks a one-line task prompt near the
+An [Omarchy](https://omarchy.org/) overlay plugin that parks a TickTick task prompt near the
 top of the screen, Spotlight style.
 
 ![The quick-add prompt, with the task syntax as its placeholder](preview.png)
@@ -71,14 +71,29 @@ The prompt parses four optional markers out of the line, in any order:
 | `~project` | `~work` | Assigns to a project, fuzzy-matched against your project list |
 | `#tag` | `#errand` | Adds a tag |
 
-Whatever is left becomes the title. A marker that doesn't resolve, like `*blah`, stays in
-the title. A task that fails to send is spooled to `~/.local/share/ticktask/error_tasks`.
+Whatever is left becomes the title, and recognised markers turn the theme's accent color as
+you type. A marker that doesn't resolve, like `*blah`, stays in the title.
+
+Tab opens the description, which is plain text and never parsed. Tab again opens subtasks, one
+per line. Subtasks only understand `*date`, because that's all TickTick's API takes on one.
+Anything else stays in the subtask's text.
 
 | Input | What it does |
 | --- | --- |
-| `Enter` | Sends the task and closes the prompt. An empty line just closes it |
-| `Esc` | Clears the line, or closes the prompt if it's already empty |
-| Click outside the card | Closes the prompt |
+| `Enter` | Sends the task and closes the prompt |
+| `Tab` / `Shift+Tab` | Moves between title, description, and subtasks |
+| `Shift+Enter` | Same as `Tab`, or starts the next subtask |
+| `Ctrl+Enter` | New line in the description |
+| `Esc` | Clears everything, or closes the prompt if it's already empty |
+| Click outside the card, or the hotkey again | Closes the prompt and keeps the draft |
+
+Reopening picks up right where you left off, so you can click away, copy something, and come
+back to paste it. A pasted list becomes one subtask per line, and the title flattens newlines
+to spaces.
+
+The draft clears only once the send succeeds. If it fails you get a notification, the draft
+stays put, and a copy lands in `~/.local/share/ticktask/error_tasks`. Drafts live in memory, so
+`omarchy restart shell` drops them.
 
 Editing plugin files in `~/.config/omarchy/plugins/ticktick-quick-add/` needs
 `omarchy restart shell` to take effect.

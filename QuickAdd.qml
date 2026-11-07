@@ -1,11 +1,14 @@
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+// Bare `Color` can resolve to the wrong type, so ReminderFlow.qml aliases it too.
+import qs.Commons as Commons
 import qs.Ui
 import "Grammar.js" as Grammar
 
-// A one-line free-text prompt, parked near the top of the screen.
+// A TickTick task prompt, parked near the top of the screen.
 //
 // `omarchy-menu-input` already does free-text capture, but the menu card is
 // centered by a hardcoded `centeredTop` (plugins/menu/Menu.qml) with no setting
@@ -15,12 +18,14 @@ import "Grammar.js" as Grammar
 // half instead: only the prompt moves, the SUPER menu stays exactly where
 // Omarchy puts it.
 //
-// Summon with `omarchy-shell shell summon ticktick-quick-add`. The typed line
-// goes to the `ticktask.sh` beside this file as a single argument.
+// Summon with `omarchy-shell shell summon ticktick-quick-add`. The fields go to
+// the `ticktask.sh` beside this file as `<title> <description> [subtask]...`.
 //
-// Borrowed wholesale from plugins/reminders/ReminderFlow.qml: the same key
-// catcher, the same scrim, the same card. Remember that plugin QML is only
-// re-instantiated by `omarchy restart shell`, not by a hot reload.
+// `keepLoaded` is what makes drafts work: closing only hides the window, so the
+// fields keep their text and caret until a send succeeds or Esc clears them.
+//
+// The scrim and card come from plugins/reminders/ReminderFlow.qml. Remember that
+// plugin QML is only re-instantiated by `omarchy restart shell`, not by a hot reload.
 Item {
   id: root
 
@@ -28,26 +33,50 @@ Item {
   property var manifest: null
 
   property bool opened: false
+  property string activeField: "title"
+  property bool sending: false
+  property string sentDraft: ""
   readonly property string promptText: "New task  ·  *friday  ·  !high  ·  ~project  ·  #tag"
   readonly property string taskScript: Qt.resolvedUrl("ticktask.sh").toString().replace("file://", "")
   readonly property string fontFamily: Style.font.menuFamily
 
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color border: Commons.Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property color scrim: Color.menu.scrim
+  property color scrim: Commons.Color.menu.scrim
   readonly property int cornerRadius: Style.cornerRadius
   property int contentMargin: Style.spacing.panelPadding
   property int headerHeight: Math.max(Style.space(34), Style.font.title + Style.spacing.controlPaddingY * 2)
   property int cardWidth: Math.min(Style.space(640), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(contentMargin * 2 + headerHeight, panel.height - Style.gapsOut * 2)
+  property int cardHeight: Math.min(card.contentTopInset + card.contentBottomInset + Math.max(headerHeight, fields.implicitHeight), panel.height - Style.gapsOut * 2)
 
   function open() {
-    title.text = ""
+    if (root.opened) {
+      root.dismiss()
+      return
+    }
     root.opened = true
+    Qt.callLater(focusActive)
+  }
 
-    Qt.callLater(function() { title.focusInput() })
+  function focusActive() {
+    ({ title: title, description: description, subtasks: subtasks })[root.activeField].focusInput()
+  }
+
+  function moveTo(field) {
+    root.activeField = field
+    // A field can be hidden until activeField says otherwise.
+    Qt.callLater(focusActive)
+  }
+
+  function draft() {
+    return JSON.stringify([title.text, description.text, subtasks.text])
+  }
+
+  function clear() {
+    title.text = description.text = subtasks.text = ""
+    root.moveTo("title")
   }
 
   function close() {
@@ -66,22 +95,53 @@ Item {
   }
 
   function handleKey(event) {
+    var order = ["title", "description", "subtasks"]
+    var at = order.indexOf(root.activeField)
+    var isReturn = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+    var shift = event.modifiers & Qt.ShiftModifier
+
     if (event.key === Qt.Key_Escape) {
-      if (title.text) title.text = ""
+      if (title.text || description.text || subtasks.text) root.clear()
       else root.dismiss()
-      event.accepted = true
-    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+    } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && shift)) {
+      if (at > 0) root.moveTo(order[at - 1])
+    } else if (event.key === Qt.Key_Tab) {
+      if (at < 2) root.moveTo(order[at + 1])
+    } else if (isReturn && shift) {
+      if (at < 2) root.moveTo(order[at + 1])
+      else subtasks.insertNewline()
+    } else if (isReturn && (event.modifiers & Qt.ControlModifier)) {
+      if (root.activeField === "description") description.insertNewline()
+    } else if (isReturn) {
       root.submit()
-      event.accepted = true
+    } else {
+      return
     }
+    event.accepted = true
   }
 
   function submit() {
+    if (root.sending) return
     var text = title.text.trim()
     root.dismiss()
     if (!text) return
+    var items = subtasks.text.split("\n").map(function(s) { return s.trim() }).filter(Boolean)
+    root.sentDraft = root.draft()
+    root.sending = true
     // A login shell because `jq` and `op` can live on a PATH the shell never saw.
-    Quickshell.execDetached(["bash", "-lc", 'exec "$0" "$@"', root.taskScript, text])
+    sender.command = ["bash", "-lc", 'exec "$0" "$@"', root.taskScript, text, description.text.trim()].concat(items)
+    sender.running = true
+  }
+
+  Process {
+    id: sender
+    onExited: function(exitCode, exitStatus) {
+      root.sending = false
+      if (exitCode !== 0 || exitStatus !== 0)
+        Quickshell.execDetached(["notify-send", "TickTick task not sent", "Your draft is kept. Reopen quick add to retry."])
+      else if (root.draft() === root.sentDraft)
+        root.clear()
+    }
   }
 
   PanelWindow {
@@ -126,30 +186,64 @@ Item {
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
 
-        Field {
-          id: title
+        Column {
+          id: fields
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          height: implicitHeight
-          tokens: Grammar.title
-          keyHandler: root.handleKey
-          foreground: root.foreground
-          accent: Color.accent
-          tint: Util.alpha(Color.accent, 0.2)
-          selection: Util.alpha(root.foreground, 0.25)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.heading
-        }
+          spacing: Style.spacing.controlPaddingY
 
-        Text {
-          anchors.fill: title
-          visible: !title.text
-          text: root.promptText + "..."
-          color: root.foreground
-          opacity: 0.58
-          font: title.font
-          elide: Text.ElideRight
+          Field {
+            id: title
+            width: parent.width
+            height: implicitHeight
+            singleLine: true
+            tokens: Grammar.title
+            placeholder: root.promptText + "..."
+            keyHandler: root.handleKey
+            onFocused: root.activeField = "title"
+            foreground: root.foreground
+            accent: Commons.Color.accent
+            tint: Util.alpha(Commons.Color.accent, 0.2)
+            selection: Util.alpha(root.foreground, 0.25)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.heading
+          }
+
+          Field {
+            id: description
+            width: parent.width
+            height: implicitHeight
+            visible: text || root.activeField === "description"
+            wrap: true
+            // Eight lines between the two fields, and neither squeezed below four.
+            maxLines: Math.max(4, 8 - subtasks.lineCount)
+            placeholder: "Description"
+            keyHandler: root.handleKey
+            onFocused: root.activeField = "description"
+            foreground: root.foreground
+            selection: Util.alpha(root.foreground, 0.25)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+
+          Field {
+            id: subtasks
+            width: parent.width
+            height: implicitHeight
+            visible: text || root.activeField === "subtasks"
+            maxLines: Math.max(4, 8 - description.lineCount)
+            tokens: Grammar.subtasks
+            placeholder: "Subtasks"
+            keyHandler: root.handleKey
+            onFocused: root.activeField = "subtasks"
+            foreground: root.foreground
+            accent: Commons.Color.accent
+            tint: Util.alpha(Commons.Color.accent, 0.2)
+            selection: Util.alpha(root.foreground, 0.25)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
         }
       }
     }

@@ -2,7 +2,8 @@
 
 # Derived from UnkwUsr/ticktask (MIT): https://github.com/UnkwUsr/ticktask
 # Local changes: `*date`, `!priority`, `~project` and `#tag` parsing out of the
-# task line, a 24h project-name cache, and failed tasks spooled to disk.
+# task line, descriptions and subtasks, a 24h project-name cache, and failed tasks
+# spooled to disk.
 
 ACCESS_TOKEN_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/ticktask/token"
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/ticktask/config"
@@ -18,7 +19,7 @@ ONE_PASSWORD_BIN=$(ls -1d \
   head -n1)
 
 if [ -z "$1" ]; then
-  echo "Usage: $0 <title> [*date] [!low|!medium|!high] [~project] [#tag]"
+  echo "Usage: $0 '<title> [*date] [!low|!medium|!high] [~project] [#tag]' [description] [subtask [*date]]..."
   echo "  *today *tomorrow *friday *monday ...  due date (any GNU date string)"
   echo "  !low !medium !high  = priority"
   echo "  ~project            = assign to project (fuzzy match)"
@@ -26,9 +27,8 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-json_escape() { sed 's/\\/\\\\/g; s/"/\\"/g'; }
-
-task_title=$(echo "$@" | json_escape)
+task_title=$1
+description=${2:-}
 
 if [ ! -f "$ACCESS_TOKEN_FILE" ]; then
   if [ ! -f "$CONFIG_FILE" ]; then
@@ -81,6 +81,22 @@ else
   fi
 fi
 
+# Takes `*<word>` with optional time suffix (e.g. *friday 3pm, *today 9:30am) out of
+# a line. Sets `line` to what's left and `parsed_date`, empty if there was no date.
+take_date() {
+  line=$1
+  parsed_date=""
+  if [[ $line =~ (^| )\*([a-zA-Z0-9_-]+)( ([0-9]{1,2}(:[0-9]{2})?[aApP][mM]))?( |$) ]]; then
+    local date_expr="${BASH_REMATCH[2]}${BASH_REMATCH[4]:+ ${BASH_REMATCH[4]}}"
+    parsed_date=$(date --date="$date_expr" +%Y-%m-%dT%H:%M:%S%z 2>/dev/null)
+    if [ -n "$parsed_date" ]; then
+      line="$(echo "$line" | sed -E 's/(^| )\*[a-zA-Z0-9_-]+( [0-9]{1,2}(:[0-9]{2})?[aApP][mM])?( |$)/ /; s/(^ | $)//g')"
+    else
+      echo "Warning: could not parse date '$date_expr', ignoring"
+    fi
+  fi
+}
+
 # parse priority: !high = 5, !medium = 3, !low = 1
 if [[ $task_title =~ (^| )!(high|medium|low)( |$) ]]; then
   case "${BASH_REMATCH[2]}" in
@@ -88,23 +104,12 @@ if [[ $task_title =~ (^| )!(high|medium|low)( |$) ]]; then
     medium) priority=3 ;;
     low)    priority=1 ;;
   esac
-  field_priority=", \"priority\": $priority"
   task_title="$(echo "$task_title" | sed -E 's/(^| )!(high|medium|low)( |$)/ /; s/(^ | $)//g')"
 fi
 
-# parse date: *<word> with optional time suffix (e.g. *friday 3pm, *today 9:30am)
-if [[ $task_title =~ (^| )\*([a-zA-Z0-9_-]+)( ([0-9]{1,2}(:[0-9]{2})?[aApP][mM]))?( |$) ]]; then
-  date_word="${BASH_REMATCH[2]}"
-  time_word="${BASH_REMATCH[4]}"
-  date_expr="$date_word${time_word:+ $time_word}"
-  parsed_date=$(date --date="$date_expr" -Iseconds 2>/dev/null)
-  if [ -n "$parsed_date" ]; then
-    field_duedate=", \"dueDate\": \"$parsed_date\""
-    task_title="$(echo "$task_title" | sed -E 's/(^| )\*[a-zA-Z0-9_-]+( [0-9]{1,2}(:[0-9]{2})?[aApP][mM])?( |$)/ /; s/(^ | $)//g')"
-  else
-    echo "Warning: could not parse date '$date_expr', ignoring"
-  fi
-fi
+take_date "$task_title"
+task_title=$line
+due_date=$parsed_date
 
 # parse project: ~name — fuzzy matches against project list (cached 24h)
 if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
@@ -113,7 +118,7 @@ if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
   if [ ! -f "$PROJECT_CACHE_FILE" ] || \
      [ $(( $(date +%s) - $(stat -c %Y "$PROJECT_CACHE_FILE") )) -gt 86400 ]; then
     mkdir -p "$(dirname "$PROJECT_CACHE_FILE")"
-    curl -sf --header "Authorization: Bearer $access_token" \
+    curl -sf --max-time 15 --header "Authorization: Bearer $access_token" \
       https://api.ticktick.com/open/v1/project >"$PROJECT_CACHE_FILE"
   fi
 
@@ -122,7 +127,6 @@ if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
     "$PROJECT_CACHE_FILE" | head -1)
 
   if [ -n "$project_id" ]; then
-    field_project=", \"projectId\": \"$project_id\""
     task_title="$(echo "$task_title" | sed -E 's/(^| )~[a-zA-Z0-9_-]+( |$)/ /; s/(^ | $)//g')"
   else
     echo "Warning: project '$project_name' not found, creating in inbox"
@@ -130,16 +134,46 @@ if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
 fi
 
 # parse tags
-# HACK: TickTick parses tags from the 'desc' field, not 'content'
-if [[ $task_title =~ (^| )#([a-zA-Z0-9_]+)( |$) ]]; then
-  tags=$(echo "$task_title" | grep -Eo "(^| )#\w+" | tr -d "\n")
-  field_desc=", \"desc\": \"$tags\""
-  task_title="$(echo "$task_title" | sed -E 's/(^| )(#\w+( |$))+/ /g; s/(^ | $)//g')"
+tags=()
+read -ra words <<<"$task_title"
+for word in "${words[@]}"; do
+  [[ $word =~ ^#([a-zA-Z0-9_]+)$ ]] && tags+=("${BASH_REMATCH[1]}")
+done
+if [ ${#tags[@]} -gt 0 ]; then
+  task_title="$(echo "$task_title" | sed -E 's/(^| )(#[a-zA-Z0-9_]+( |$))+/ /g; s/(^ | $)//g')"
 fi
 
-json_task='{ "title": "'"$task_title"'"'"$field_content$field_duedate$field_priority$field_project$field_desc"' }'
+# parse subtasks
+items='[]'
+for subtask in "${@:3}"; do
+  take_date "$subtask"
+  items=$(jq --arg title "$line" --arg date "$parsed_date" \
+    '. + [{title: $title, status: 0, startDate: $date} | with_entries(select(.value != ""))]' <<<"$items")
+done
+
+# TickTick only shows `content` on a plain task and `desc` on a checklist.
+json_task=$(jq -n \
+  --arg title "$task_title" \
+  --arg description "$description" \
+  --arg dueDate "$due_date" \
+  --arg priority "${priority:-}" \
+  --arg projectId "${project_id:-}" \
+  --argjson items "$items" \
+  '{
+    title: $title,
+    dueDate: $dueDate,
+    priority: ($priority | if . == "" then "" else tonumber end),
+    projectId: $projectId,
+    tags: $ARGS.positional,
+    items: $items,
+    kind: (if ($items | length) > 0 then "CHECKLIST" else "" end),
+    desc: (if ($items | length) > 0 then $description else "" end),
+    content: (if ($items | length) > 0 then "" else $description end)
+  } | with_entries(select(.value != "" and .value != []))' \
+  --args -- "${tags[@]}")
 
 resp_create_task=$(curl -s \
+  --max-time 15 \
   --fail-with-body \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $access_token" \
@@ -151,7 +185,8 @@ if (($? != 0)); then
   echo "$resp_create_task"
 
   mkdir -p "$FOLDER_ERROR_TASKS"
-  echo "$@" >"$FOLDER_ERROR_TASKS/$(date +%s)"
+  # %q so a spooled task can be pasted back after the script name, structure intact.
+  printf '%q ' "$@" >"$FOLDER_ERROR_TASKS/$(date +%s)"
   echo "Task saved to $FOLDER_ERROR_TASKS"
 
   exit 2

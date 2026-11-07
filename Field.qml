@@ -11,14 +11,26 @@ Flickable {
   property alias font: edit.font
   property var tokens: null
   property var keyHandler: null
+  property string placeholder: ""
+  property bool singleLine: false
+  property bool wrap: false
+  property int maxLines: 1
+  readonly property int lineCount: edit.lineCount
   property color foreground: "white"
   property color accent: "white"
   property color tint: "transparent"
   property color selection: "gray"
 
+  signal focused()
+
   function focusInput() { edit.forceActiveFocus() }
 
-  implicitHeight: edit.implicitHeight
+  function insertNewline() {
+    if (edit.selectedText) edit.remove(edit.selectionStart, edit.selectionEnd)
+    edit.insert(edit.cursorPosition, "\n")
+  }
+
+  implicitHeight: Math.min(edit.implicitHeight, maxLines * edit.implicitHeight / Math.max(1, edit.lineCount))
   contentWidth: edit.width
   contentHeight: edit.implicitHeight
   clip: true
@@ -27,7 +39,8 @@ Flickable {
 
   TextEdit {
     id: edit
-    width: Math.max(root.width, implicitWidth)
+    width: root.wrap ? root.width : Math.max(root.width, implicitWidth)
+    wrapMode: root.wrap ? TextEdit.Wrap : TextEdit.NoWrap
     textFormat: TextEdit.PlainText
     color: root.tokens ? "transparent" : root.foreground
     selectedTextColor: color
@@ -45,6 +58,16 @@ Flickable {
       if (root.keyHandler) root.keyHandler(event)
     }
 
+    onActiveFocusChanged: if (activeFocus) root.focused()
+
+    // A paste is the only way a newline gets here.
+    onTextChanged: {
+      if (!root.singleLine || text.indexOf("\n") === -1) return
+      var at = cursorPosition
+      text = text.replace(/\n/g, " ")
+      cursorPosition = at
+    }
+
     onCursorRectangleChanged: {
       var r = cursorRectangle
       if (root.contentX > r.x) root.contentX = r.x
@@ -53,16 +76,27 @@ Flickable {
       else if (root.contentY + root.height < r.y + r.height) root.contentY = r.y + r.height - root.height
     }
 
+    Text {
+      width: root.width
+      visible: !edit.text
+      text: root.placeholder
+      color: root.foreground
+      opacity: 0.58
+      font: edit.font
+      elide: Text.ElideRight
+    }
+
     Repeater {
       model: root.tokens ? root.tokens(edit.text) : []
 
       Rectangle {
         required property var modelData
         // positionToRectangle() has no dependencies of its own, and the first
-        // call can run before layout. contentWidth changes once layout is done.
+        // call can run before layout. contentWidth changes once layout is done,
+        // and can fire on a piece the new text has already left behind.
         readonly property rect at: {
           edit.contentWidth
-          return edit.positionToRectangle(modelData.start)
+          return modelData.start <= edit.length ? edit.positionToRectangle(modelData.start) : Qt.rect(0, 0, 0, 0)
         }
         x: at.x
         y: at.y
