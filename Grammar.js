@@ -41,3 +41,37 @@ function segments(text, rules) {
 
 function title(text) { return segments(text, [date, priority, project, tag]) }
 function subtasks(text) { return segments(text, [date]) }
+
+// "🚀 Side Projects" -> "side-projects". ticktask.sh has the same rule in jq.
+function slug(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+}
+
+// The completions for the token the caret is in, or null. `data` is
+// { projects: [{name}], tags: [{name, label}] } straight from the API caches.
+// Returns { start, end, items: [{ label, insert }] }, where start..end is the
+// whole word to replace, trigger included.
+function suggest(text, caret, data) {
+  var m = /(^| )([~!#])([^ ]*)$/.exec(text.slice(0, caret))
+  if (!m) return null
+  var start = m.index + m[1].length
+  var end = caret + /^[^ ]*/.exec(text.slice(caret))[0].length
+  var query = m[3].toLowerCase()
+  var options = {
+    "!": ["high", "medium", "low"].map(function(p) { return { label: p, insert: "!" + p } }),
+    "~": (data.projects || []).filter(function(p) { return !p.closed && slug(p.name) }).map(function(p) {
+      return { label: p.name, insert: "~" + slug(p.name) }
+    }),
+    "#": (data.tags || []).map(function(t) { return { label: t.label || t.name, insert: "#" + t.name } }),
+  }[m[2]]
+  var word = text.slice(start, end)
+  var items = options.filter(function(o) {
+    return o.insert.slice(1).indexOf(query) !== -1 || o.label.toLowerCase().indexOf(query) !== -1
+  })
+  // Exact first, as ticktask.sh resolves it, so Enter on a finished `~wish` keeps it.
+  items = items.filter(function(o) { return o.insert === word })
+    .concat(items.filter(function(o) { return o.insert !== word })).slice(0, 6)
+  // Nothing left to pick once the word already is the only match.
+  if (!items.length || (items.length === 1 && items[0].insert === word)) return null
+  return { start: start, end: end, items: items }
+}
