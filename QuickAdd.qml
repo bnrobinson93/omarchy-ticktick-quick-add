@@ -14,13 +14,8 @@ import qs.Ui
 // half instead: only the prompt moves, the SUPER menu stays exactly where
 // Omarchy puts it.
 //
-// Named for its one caller, but still payload-driven: the summon carries the
-// prompt text and the command, and the typed line is passed to that command as
-// a single argument. Nothing here knows about TickTick — `ticktick-add-launch`
-// supplies `ticktask.sh` and the task-syntax hint in the prompt.
-//
-//   omarchy-shell shell summon ticktick-quick-add \
-//     '{"prompt":"New task","exec":"ticktask.sh"}'
+// Summon with `omarchy-shell shell summon ticktick-quick-add`. The typed line
+// goes to the `ticktask.sh` beside this file as a single argument.
 //
 // Borrowed wholesale from plugins/reminders/ReminderFlow.qml: the same key
 // catcher, the same scrim, the same card. Remember that plugin QML is only
@@ -32,10 +27,10 @@ Item {
   property var manifest: null
 
   property bool opened: false
-  property string promptText: "Input"
-  property string execCommand: ""
+  readonly property string promptText: "New task  ·  *friday  ·  !high  ·  ~project  ·  #tag"
+  readonly property string taskScript: Qt.resolvedUrl("ticktask.sh").toString().replace("file://", "")
   property string filterText: ""
-  property string fontFamily: Style.font.menuFamily
+  readonly property string fontFamily: Style.font.menuFamily
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -48,14 +43,7 @@ Item {
   property int cardWidth: Math.min(Style.space(640), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(contentMargin * 2 + headerHeight, panel.height - Style.gapsOut * 2)
 
-  function open(payloadJson) {
-    var payload = ({})
-    try { payload = JSON.parse(payloadJson || "{}") } catch (e) { payload = ({}) }
-
-    root.promptText = String(payload.prompt || "Input")
-    root.execCommand = String(payload.exec || "")
-    if (payload.fontFamily) root.fontFamily = payload.fontFamily
-
+  function open() {
     root.filterText = ""
     root.opened = true
 
@@ -74,7 +62,7 @@ Item {
 
   function toggle() {
     if (root.opened) root.dismiss()
-    else root.open("{}")
+    else root.open()
   }
 
   function setFilter(nextFilter) {
@@ -84,11 +72,9 @@ Item {
   function submit() {
     var text = root.filterText.trim()
     root.dismiss()
-    if (!text || !root.execCommand) return
-    // `"$1"` rather than interpolation: the task line carries quotes, `!`, and
-    // `#` often enough that pasting it into the command string would be a
-    // quoting bug waiting to happen.
-    Quickshell.execDetached(["bash", "-lc", root.execCommand + ' "$1"', "bash", text])
+    if (!text) return
+    // A login shell because `jq` and `op` can live on a PATH the shell never saw.
+    Quickshell.execDetached(["bash", "-lc", 'exec "$0" "$@"', root.taskScript, text])
   }
 
   PanelWindow {

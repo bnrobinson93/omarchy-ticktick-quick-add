@@ -18,10 +18,6 @@ omarchy plugin enable ticktick-quick-add
 
 Updates come from `omarchy plugin update ticktick-quick-add`.
 
-This plugin only draws the prompt. To send tasks to TickTick, also install the
-[`ticktick`](https://github.com/bnrobinson93/omarchy-ticktick) bar widget. Clicking the
-widget opens the prompt, and its README covers sign-in and task syntax.
-
 Sending tasks needs your own TickTick API credentials.
 
 <details>
@@ -43,7 +39,7 @@ Sending tasks needs your own TickTick API credentials.
 
    ```bash
    chmod 600 ~/.config/ticktask/config
-   ~/.config/omarchy/plugins/ticktick/ticktask.sh "hello"
+   ~/.config/omarchy/plugins/ticktick-quick-add/ticktask.sh "hello"
    ```
 
 6. Approve access in the browser. The page you land on will fail to load, which is expected.
@@ -60,31 +56,27 @@ current version.
 
 ## Usage
 
-To open the prompt from a keybinding or script, run the widget's launcher:
+Bind this to a key. Ctrl+Shift+A is free in the Omarchy defaults:
 
 ```bash
-~/.config/omarchy/plugins/ticktick/ticktick-add-launch
+omarchy-shell shell summon ticktick-quick-add
 ```
 
-Or summon the overlay with your own prompt and command:
+The prompt parses four optional markers out of the line, in any order:
 
-```bash
-omarchy-shell shell summon ticktick-quick-add \
-  '{"prompt":"New task","exec":"ticktask.sh"}'
-```
-
-| Key | Default | What it does |
+| Marker | Example | What it does |
 | --- | --- | --- |
-| `prompt` | `Input` | Placeholder text shown until you start typing |
-| `exec` | none | Command that receives the typed line as one argument. Without it, the line is dropped |
-| `fontFamily` | the menu font | Font for the prompt |
+| `*date` | `*friday`, `*today 9:30am` | Due date, any string GNU `date` understands |
+| `!priority` | `!high`, `!medium`, `!low` | Priority |
+| `~project` | `~work` | Assigns to a project, fuzzy-matched against your project list |
+| `#tag` | `#errand` | Adds a tag |
 
-`exec` runs in a login `bash`, so it can use anything on your `PATH`. The typed line never
-goes through shell parsing, so quotes, `!` and `#` arrive intact.
+Whatever is left becomes the title. A marker that doesn't resolve, like `*blah`, stays in
+the title. A task that fails to send is spooled to `~/.local/share/ticktask/error_tasks`.
 
 | Input | What it does |
 | --- | --- |
-| `Enter` | Runs the command and closes the prompt. An empty line just closes it |
+| `Enter` | Sends the task and closes the prompt. An empty line just closes it |
 | `Esc` | Clears the line, or closes the prompt if it's already empty |
 | Click outside the card | Closes the prompt |
 
@@ -97,9 +89,6 @@ Editing plugin files in `~/.config/omarchy/plugins/ticktick-quick-add/` needs
 omarchy plugin remove ticktick-quick-add
 ```
 
-The `ticktick` widget's count and right-click keep working without it. Only click-to-capture
-goes away.
-
 ## License and dependencies
 
 MIT, see [LICENSE](LICENSE).
@@ -107,6 +96,6 @@ MIT, see [LICENSE](LICENSE).
 | Dependency | Required | Why |
 | --- | --- | --- |
 | Omarchy 4 (Quattro) with Quickshell | yes | the shell that hosts the plugin |
-| [`ticktick`](https://github.com/bnrobinson93/omarchy-ticktick) | for TickTick capture | supplies the launcher and `ticktask.sh`, which needs your TickTick API credentials |
+| `curl`, `jq` | yes | `ticktask.sh` talks to the TickTick API with them |
 
-Nothing is vendored, nothing is compiled, and the plugin makes no network calls of its own.
+`ticktask.sh` is derived from [UnkwUsr/ticktask](https://github.com/UnkwUsr/ticktask), MIT.
