@@ -3,6 +3,7 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "Grammar.js" as Grammar
 
 // A one-line free-text prompt, parked near the top of the screen.
 //
@@ -29,7 +30,6 @@ Item {
   property bool opened: false
   readonly property string promptText: "New task  ·  *friday  ·  !high  ·  ~project  ·  #tag"
   readonly property string taskScript: Qt.resolvedUrl("ticktask.sh").toString().replace("file://", "")
-  property string filterText: ""
   readonly property string fontFamily: Style.font.menuFamily
 
   property color background: Color.menu.background
@@ -44,10 +44,10 @@ Item {
   property int cardHeight: Math.min(contentMargin * 2 + headerHeight, panel.height - Style.gapsOut * 2)
 
   function open() {
-    root.filterText = ""
+    title.text = ""
     root.opened = true
 
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    Qt.callLater(function() { title.focusInput() })
   }
 
   function close() {
@@ -65,12 +65,19 @@ Item {
     else root.open()
   }
 
-  function setFilter(nextFilter) {
-    root.filterText = nextFilter
+  function handleKey(event) {
+    if (event.key === Qt.Key_Escape) {
+      if (title.text) title.text = ""
+      else root.dismiss()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.submit()
+      event.accepted = true
+    }
   }
 
   function submit() {
-    var text = root.filterText.trim()
+    var text = title.text.trim()
     root.dismiss()
     if (!text) return
     // A login shell because `jq` and `op` can live on a PATH the shell never saw.
@@ -113,45 +120,35 @@ Item {
       MouseArea { anchors.fill: parent; onClicked: {} }
 
       Item {
-        id: keyCatcher
-        anchors.fill: parent
-        focus: true
-
-        Keys.priority: Keys.BeforeItem
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
-            if (root.filterText) root.setFilter("")
-            else root.dismiss()
-            event.accepted = true
-          } else if (Util.editsFilter(event, root.filterText)) {
-            root.setFilter(Util.editedFilter(event, root.filterText))
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            root.submit()
-            event.accepted = true
-          } else if (event.text && event.text.length === 1 && event.text.charCodeAt(0) >= 32 && event.text.charCodeAt(0) !== 127) {
-            root.setFilter(root.filterText + event.text)
-            event.accepted = true
-          }
-        }
-      }
-
-      Item {
         anchors.fill: parent
         anchors.topMargin: card.contentTopInset
         anchors.rightMargin: card.contentRightInset
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
 
-        Text {
+        Field {
+          id: title
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          text: root.filterText || (root.promptText + "...")
-          color: root.foreground
-          opacity: root.filterText ? 1 : 0.58
+          height: implicitHeight
+          tokens: Grammar.title
+          keyHandler: root.handleKey
+          foreground: root.foreground
+          accent: Color.accent
+          tint: Util.alpha(Color.accent, 0.2)
+          selection: Util.alpha(root.foreground, 0.25)
           font.family: root.fontFamily
           font.pixelSize: Style.font.heading
+        }
+
+        Text {
+          anchors.fill: title
+          visible: !title.text
+          text: root.promptText + "..."
+          color: root.foreground
+          opacity: 0.58
+          font: title.font
           elide: Text.ElideRight
         }
       }

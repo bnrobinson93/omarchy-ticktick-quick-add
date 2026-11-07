@@ -89,7 +89,7 @@ if [[ $task_title =~ (^| )!(high|medium|low)( |$) ]]; then
     low)    priority=1 ;;
   esac
   field_priority=", \"priority\": $priority"
-  task_title="$(echo "$task_title" | sed -E 's/(^| )!(high|medium|low)( |$)/ /g; s/(^ | $)//g')"
+  task_title="$(echo "$task_title" | sed -E 's/(^| )!(high|medium|low)( |$)/ /; s/(^ | $)//g')"
 fi
 
 # parse date: *<word> with optional time suffix (e.g. *friday 3pm, *today 9:30am)
@@ -100,7 +100,7 @@ if [[ $task_title =~ (^| )\*([a-zA-Z0-9_-]+)( ([0-9]{1,2}(:[0-9]{2})?[aApP][mM])
   parsed_date=$(date --date="$date_expr" -Iseconds 2>/dev/null)
   if [ -n "$parsed_date" ]; then
     field_duedate=", \"dueDate\": \"$parsed_date\""
-    task_title="$(echo "$task_title" | sed -E 's/(^| )\*[a-zA-Z0-9_-]+( [0-9]{1,2}(:[0-9]{2})?[aApP][mM])?( |$)/ /g; s/(^ | $)//g')"
+    task_title="$(echo "$task_title" | sed -E 's/(^| )\*[a-zA-Z0-9_-]+( [0-9]{1,2}(:[0-9]{2})?[aApP][mM])?( |$)/ /; s/(^ | $)//g')"
   else
     echo "Warning: could not parse date '$date_expr', ignoring"
   fi
@@ -123,7 +123,7 @@ if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
 
   if [ -n "$project_id" ]; then
     field_project=", \"projectId\": \"$project_id\""
-    task_title="$(echo "$task_title" | sed -E 's/(^| )~[a-zA-Z0-9_-]+( |$)/ /g; s/(^ | $)//g')"
+    task_title="$(echo "$task_title" | sed -E 's/(^| )~[a-zA-Z0-9_-]+( |$)/ /; s/(^ | $)//g')"
   else
     echo "Warning: project '$project_name' not found, creating in inbox"
   fi
