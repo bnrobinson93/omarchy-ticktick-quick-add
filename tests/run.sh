@@ -6,17 +6,22 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-mkdir -p "$tmp/bin" "$tmp/data/ticktask"
+mkdir -p "$tmp/bin" "$tmp/data/ticktask" "$tmp/api"
 printf 'fake-token' >"$tmp/data/ticktask/token"
-printf '[{"id":"p-work","name":"Work"}]' >"$tmp/data/ticktask/projects.json"
+printf '[{"id":"p-work","name":"Work"},{"id":"p-wl","name":"🎁 Wish List"},{"id":"p-wish","name":"Wish"},{"id":"p-old","name":"Old Work","closed":true}]' \
+  >"$tmp/data/ticktask/projects.json"
 
+# GETs answer with $tmp/api/<last URL segment>.
 cat >"$tmp/bin/curl" <<STUB
 #!/bin/bash
 [ -e "$tmp/fail" ] && { echo "stub failure"; exit 22; }
 while [ \$# -gt 0 ]; do
   [ "\$1" = "--data" ] && printf '%s' "\$2" >"$tmp/sent"
+  url=\$1
   shift
 done
+[ -f "$tmp/api/\${url##*/}" ] && cat "$tmp/api/\${url##*/}"
+true
 STUB
 chmod +x "$tmp/bin/curl"
 
@@ -79,7 +84,54 @@ check 'subtasks parse dates only, other markers stay as text' \
 send 'No description' '' 'Only a subtask'
 check 'empty description is left out' '(has("desc") | not) and (has("content") | not) and (.items | length) == 1'
 
+send 'Gift ideas ~wish-list'
+check 'emoji project names match by slug' '.title == "Gift ideas" and .projectId == "p-wl"'
+send 'Buy ~wish'
+check 'an exact slug beats a longer one that contains it' '.projectId == "p-wish"'
+send 'Dig ~old-work'
+check 'archived projects never match' '.title == "Dig ~old-work" and (has("projectId") | not)'
+
+# Suggestions: the overlay offers `~<slug>` and must find the same project the script does.
+node -e '
+  const vm = require("vm"), fs = require("fs"), assert = require("assert");
+  const g = {};
+  vm.runInNewContext(fs.readFileSync(process.argv[1] + "/Grammar.js", "utf8").replace(".pragma library", ""), g);
+  const data = {
+    projects: JSON.parse(fs.readFileSync(process.argv[2], "utf8")).concat([{ name: "🎉" }]),
+    tags: [{ name: "errand", label: "Errand" }, { name: "deep_work", label: "Deep Work" }],
+  };
+  const at = (text, caret = text.length) => {
+    const s = JSON.parse(JSON.stringify(g.suggest(text, caret, data))); // out of the vm realm
+    return s && { start: s.start, end: s.end, items: s.items.map(i => i.label + "=" + i.insert) };
+  };
+  assert.deepStrictEqual(at("Buy ~wi"), { start: 4, end: 7, items: ["🎁 Wish List=~wish-list", "Wish=~wish"] });
+  assert.deepStrictEqual(at("~", 1).items, ["Work=~work", "🎁 Wish List=~wish-list", "Wish=~wish"], "all-emoji and archived projects are skipped");
+  assert.deepStrictEqual(at("Buy ~wish").items, ["Wish=~wish", "🎁 Wish List=~wish-list"], "an exact slug comes first, as in the script");
+  assert.deepStrictEqual(at("a !m").items, ["medium=!medium"]);
+  assert.deepStrictEqual(at("a #deep").items, ["Deep Work=#deep_work"], "tags show label, insert name");
+  assert.deepStrictEqual(at("a #wor x", 4), { start: 2, end: 6, items: ["Deep Work=#deep_work"] }, "caret mid-token spans the word");
+  assert.strictEqual(at("a ~work"), null, "a finished token closes the list");
+  assert.strictEqual(at("x!hi"), null, "only after a space");
+  assert.strictEqual(at("a ~wish b"), null, "caret not in a token");
+  assert.strictEqual(at("a ~zzz"), null);
+' "$root" "$tmp/data/ticktask/projects.json"
+echo 'ok: suggestions'
+
+printf '[{"id":"p-new","name":"New"}]' >"$tmp/api/project"
+printf '[{"name":"errand","label":"Errand"}]' >"$tmp/api/tag"
+send --refresh
+jq -e '.[0].id == "p-new"' "$tmp/data/ticktask/projects.json" >/dev/null &&
+  jq -e '.[0].name == "errand"' "$tmp/data/ticktask/tags.json" >/dev/null ||
+  { echo 'FAIL: --refresh did not cache projects and tags'; exit 1; }
+echo 'ok: --refresh caches projects and tags'
+
 touch "$tmp/fail"
+if send --refresh; then echo 'FAIL: failed refresh exited 0'; exit 1; fi
+jq -e '.[0].id == "p-new"' "$tmp/data/ticktask/projects.json" >/dev/null &&
+  jq -e '.[0].name == "errand"' "$tmp/data/ticktask/tags.json" >/dev/null ||
+  { echo 'FAIL: failed refresh clobbered the cache'; exit 1; }
+echo 'ok: failed refresh keeps the last cache'
+
 if send 'Lost? "no"' 'Details here' 'Sub one'; then echo 'FAIL: failed send exited 0'; exit 1; fi
 eval "spooled=($(cat "$tmp"/data/ticktask/error_tasks/*))"
 [ "${spooled[*]}" = 'Lost? "no" Details here Sub one' ] && [ "${#spooled[@]}" -eq 3 ] \

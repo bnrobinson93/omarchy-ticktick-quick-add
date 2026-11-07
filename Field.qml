@@ -9,6 +9,7 @@ Flickable {
 
   property alias text: edit.text
   property alias font: edit.font
+  property alias cursorPosition: edit.cursorPosition
   property var tokens: null
   property var keyHandler: null
   property string placeholder: ""
@@ -28,6 +29,20 @@ Flickable {
   function insertNewline() {
     if (edit.selectedText) edit.remove(edit.selectionStart, edit.selectionEnd)
     edit.insert(edit.cursorPosition, "\n")
+  }
+
+  // Through remove and insert rather than `text =`, so undo still works.
+  function replace(start, end, text) {
+    edit.remove(start, end)
+    edit.insert(start, text)
+    edit.cursorPosition = start + text.length
+  }
+
+  // Where `pos` sits, in this item's coordinates. positionToRectangle() has no
+  // dependencies of its own, so this reads contentWidth to re-run on layout.
+  function xAt(pos) {
+    edit.contentWidth
+    return edit.positionToRectangle(Math.min(pos, edit.length)).x - root.contentX
   }
 
   implicitHeight: Math.min(edit.implicitHeight, maxLines * edit.implicitHeight / Math.max(1, edit.lineCount))

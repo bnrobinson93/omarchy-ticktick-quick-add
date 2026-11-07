@@ -51,12 +51,33 @@ Item {
   property int cardWidth: Math.min(Style.space(640), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(card.contentTopInset + card.contentBottomInset + Math.max(headerHeight, fields.implicitHeight), panel.height - Style.gapsOut * 2)
 
+  // `ticktask.sh --refresh` rewrites these caches on every open; until it lands,
+  // or when it fails, the last ones stand.
+  readonly property string cacheDir: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/ticktask"
+  readonly property var suggestData: ({ projects: parseCache(projectsFile.text()), tags: parseCache(tagsFile.text()) })
+  property bool suggestDismissed: false
+  property int suggestIndex: 0
+  readonly property var suggestion: root.opened && root.activeField === "title" && !root.suggestDismissed
+    ? Grammar.suggest(title.text, title.cursorPosition, root.suggestData) : null
+  onSuggestionChanged: root.suggestIndex = 0
+
+  function parseCache(text) {
+    try { return JSON.parse(text) } catch (e) { return [] }
+  }
+
+  function pickSuggestion(index) {
+    var s = root.suggestion
+    var spaced = title.text.charAt(s.end) === " "
+    title.replace(s.start, s.end + (spaced ? 1 : 0), s.items[index].insert + " ")
+  }
+
   function open() {
     if (root.opened) {
       root.dismiss()
       return
     }
     root.opened = true
+    if (!refresher.running) refresher.running = true
     Qt.callLater(focusActive)
   }
 
@@ -99,8 +120,17 @@ Item {
     var at = order.indexOf(root.activeField)
     var isReturn = event.key === Qt.Key_Return || event.key === Qt.Key_Enter
     var shift = event.modifiers & Qt.ShiftModifier
+    var s = root.suggestion
 
-    if (event.key === Qt.Key_Escape) {
+    // An open list owns these keys. Every Return picks, so a half-typed `~wo` is never sent.
+    if (s && (event.key === Qt.Key_Down || event.key === Qt.Key_Up)) {
+      var step = event.key === Qt.Key_Down ? 1 : -1
+      root.suggestIndex = (root.suggestIndex + step + s.items.length) % s.items.length
+    } else if (s && (isReturn || (event.key === Qt.Key_Tab && !shift))) {
+      root.pickSuggestion(root.suggestIndex)
+    } else if (s && event.key === Qt.Key_Escape) {
+      root.suggestDismissed = true
+    } else if (event.key === Qt.Key_Escape) {
       if (title.text || description.text || subtasks.text) root.clear()
       else root.dismiss()
     } else if (event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && shift)) {
@@ -142,6 +172,27 @@ Item {
       else if (root.draft() === root.sentDraft)
         root.clear()
     }
+  }
+
+  Process {
+    id: refresher
+    command: ["bash", "-lc", 'exec "$0" "$@"', root.taskScript, "--refresh"]
+    onExited: {
+      projectsFile.reload()
+      tagsFile.reload()
+    }
+  }
+
+  FileView {
+    id: projectsFile
+    path: root.cacheDir + "/projects.json"
+    printErrors: false
+  }
+
+  FileView {
+    id: tagsFile
+    path: root.cacheDir + "/tags.json"
+    printErrors: false
   }
 
   PanelWindow {
@@ -202,6 +253,7 @@ Item {
             placeholder: root.promptText + "..."
             keyHandler: root.handleKey
             onFocused: root.activeField = "title"
+            onTextChanged: root.suggestDismissed = false
             foreground: root.foreground
             accent: Commons.Color.accent
             tint: Util.alpha(Commons.Color.accent, 0.2)
@@ -243,6 +295,60 @@ Item {
             selection: Util.alpha(root.foreground, 0.25)
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
+          }
+        }
+
+        // Floats over the fields below, and past the card when they're hidden.
+        Rectangle {
+          id: suggestions
+          visible: !!root.suggestion
+          z: 1
+          width: Math.min(parent.width, Style.space(320))
+          height: list.implicitHeight + list.y * 2
+          x: root.suggestion ? Math.max(0, Math.min(title.xAt(root.suggestion.start), parent.width - width)) : 0
+          y: fields.y + title.height + Style.spacing.controlPaddingY
+          radius: root.cornerRadius
+          color: root.background
+          border.color: root.border
+          border.width: Style.spacing.hairline
+
+          Column {
+            id: list
+            x: Style.spacing.controlPaddingY
+            y: x
+            width: parent.width - x * 2
+
+            Repeater {
+              model: root.suggestion ? root.suggestion.items : []
+
+              Rectangle {
+                required property var modelData
+                required property int index
+                readonly property bool selected: index === root.suggestIndex
+                width: list.width
+                height: label.implicitHeight + Style.spacing.controlPaddingY * 2
+                radius: root.cornerRadius
+                color: selected ? Commons.Color.menu.selectedBackground : "transparent"
+
+                Text {
+                  id: label
+                  anchors.verticalCenter: parent.verticalCenter
+                  x: Style.spacing.controlPaddingX
+                  width: parent.width - x * 2
+                  text: parent.modelData.label
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: parent.selected ? Commons.Color.menu.selectedText : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  onClicked: root.pickSuggestion(parent.index)
+                }
+              }
+            }
           }
         }
       }

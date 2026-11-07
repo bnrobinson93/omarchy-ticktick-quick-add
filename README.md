@@ -74,6 +74,27 @@ The prompt parses four optional markers out of the line, in any order:
 Whatever is left becomes the title, and recognised markers turn the theme's accent color as
 you type. A marker that doesn't resolve, like `*blah`, stays in the title.
 
+Typing `~`, `!`, or `#` in the title opens a list of your projects, priorities, or tags, and
+narrows it as you keep typing.
+
+![Picking a project from the list after typing ~](preview-projects.png)
+
+The list shows project names as TickTick has them, emoji and all. Picking one writes a plain
+version into the title, so `🎁 Gift Ideas` becomes `~gift-ideas`. Archived projects are left out,
+and tags show their display name but insert the real one.
+
+![Picking a tag after typing #](preview-tags.png)
+
+| Input, while the list is open | What it does |
+| --- | --- |
+| `Up` / `Down` | Moves through the list |
+| `Tab` / `Enter` | Puts the highlighted item in the title |
+| `Esc` | Closes the list and leaves the title alone |
+
+Once the list is closed, every key goes back to the table below. Projects and tags come from a
+cache in `~/.local/share/ticktask/`, refreshed in the background each time the prompt opens. If
+there's no network the last cache stays, and typing a marker by hand works as before.
+
 Tab opens the description, which is plain text and never parsed. Tab again opens subtasks, one
 per line. Subtasks only understand `*date`, because that's all TickTick's API takes on one.
 Anything else stays in the subtask's text.

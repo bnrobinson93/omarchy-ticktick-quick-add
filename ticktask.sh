@@ -9,6 +9,7 @@ ACCESS_TOKEN_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/ticktask/token"
 CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/ticktask/config"
 FOLDER_ERROR_TASKS="${XDG_DATA_HOME:-$HOME/.local/share}/ticktask/error_tasks"
 PROJECT_CACHE_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/ticktask/projects.json"
+TAG_CACHE_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/ticktask/tags.json"
 ONE_PASSWORD_BIN=$(ls -1d \
   /opt/homebrew/bin/op \
   /usr/bin/op \
@@ -25,6 +26,23 @@ if [ -z "$1" ]; then
   echo "  ~project            = assign to project (fuzzy match)"
   echo "  #tag                = add tag"
   exit 1
+fi
+
+# Writes to a temp file first so a failed fetch keeps the last good cache.
+fetch_cache() { # url, file
+  mkdir -p "$(dirname "$2")"
+  curl -sf --max-time 15 --header "Authorization: Bearer $access_token" "$1" >"$2.tmp" &&
+    mv "$2.tmp" "$2" || { rm -f "$2.tmp"; return 1; }
+}
+
+# The overlay runs this on every open to keep its suggestions current. Without a
+# token it bails rather than start the interactive login.
+if [ "$1" = "--refresh" ]; then
+  [ -f "$ACCESS_TOKEN_FILE" ] || exit 1
+  access_token=$(<"$ACCESS_TOKEN_FILE")
+  fetch_cache https://api.ticktick.com/open/v1/project "$PROJECT_CACHE_FILE" &&
+    fetch_cache https://api.ticktick.com/open/v1/tag "$TAG_CACHE_FILE"
+  exit
 fi
 
 task_title=$1
@@ -117,14 +135,14 @@ if [[ $task_title =~ (^| )~([a-zA-Z0-9_-]+)( |$) ]]; then
 
   if [ ! -f "$PROJECT_CACHE_FILE" ] || \
      [ $(( $(date +%s) - $(stat -c %Y "$PROJECT_CACHE_FILE") )) -gt 86400 ]; then
-    mkdir -p "$(dirname "$PROJECT_CACHE_FILE")"
-    curl -sf --max-time 15 --header "Authorization: Bearer $access_token" \
-      https://api.ticktick.com/open/v1/project >"$PROJECT_CACHE_FILE"
+    fetch_cache https://api.ticktick.com/open/v1/project "$PROJECT_CACHE_FILE"
   fi
 
-  project_id=$(jq -r --arg name "${project_name,,}" \
-    '.[] | select(.name | gsub("[^a-zA-Z0-9 ]"; "") | ascii_downcase | contains($name)) | .id' \
-    "$PROJECT_CACHE_FILE" | head -1)
+  # `slug` must match slug() in Grammar.js, which is what the overlay suggests.
+  project_id=$(jq -r --arg name "${project_name,,}" '
+    def slug: ascii_downcase | gsub("[^a-z0-9]+"; "-") | gsub("^-|-$"; "");
+    [.[] | select((.closed | not) and (.name | slug | contains($name)))] | sort_by(.name | slug != $name) | .[0].id // empty' \
+    "$PROJECT_CACHE_FILE")
 
   if [ -n "$project_id" ]; then
     task_title="$(echo "$task_title" | sed -E 's/(^| )~[a-zA-Z0-9_-]+( |$)/ /; s/(^ | $)//g')"
